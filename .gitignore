@@ -10,3 +10,4 @@ wheels/
 .venv
 recorded.mp4
 eisa.py
+test.py
