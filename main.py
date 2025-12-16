@@ -1,56 +1,52 @@
-import cv2
-import collections
-import time
-import datetime
+import cv2  # to record and perform motion detection
+import collections  # to store buffers in deque data structures
+import time  # to for buffer and timeout time measurement
+import datetime  # to display current time on recording
 
 # ==========================================
 # SETTINGS
 # ==========================================
-PRE_MOTION_BUFFER_SECONDS = 3
-RECORDER_TIMEOUT_SECONDS = 10
+
+buffer = 3  # seconds of video to record before motion happened
+timeout = 10  # seconds of video to record after motion has ceased
 MIN_CONTOUR_AREA = 500  # Minimum area to consider as valid motion
 OUTPUT_FILENAME = "recorded.mp4"
+vid_src = 0
 
 # ==========================================
 # INITIALIZATION
 # ==========================================
 
 
-def setup_camera(source=0):
-    """
-    Initializes the video capture source and returns the cap object
-    along with video properties (fps, width, height).
-    """
+# intialize video capture source and returns the cap object and video properties.
+def setup_camera(source):
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         print("Error: Could not open camera.")
         return None, 0, 0, 0
 
+    # get relevant information about the video stream
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
 
-    # Fallback if FPS is not detected
+    # if FPS is not reported or reportly 0, assume it to be 30
     if fps == 0.0:
         fps = 30.0
 
     return cap, fps, frame_width, frame_height
 
 
+# makes the VideoWriter object for saving the recording to a file
 def setup_video_writer(filename, fps, width, height):
-    """
-    Initializes the VideoWriter object for saving the output.
-    """
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    frame_size = (width, height)
-    return cv2.VideoWriter(filename, fourcc, fps, frame_size)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # specify file encode and extension
+    frame_size = (width, height)  # specify dimensions, taken from video source
+    return cv2.VideoWriter(filename, fourcc, fps, frame_size)  # return the VideoWriter
 
 
+# make a buffer of fixed size based on fps and how long of a buffer to keep
+# uses the deque data structure which is more efficient than python lists
 def initialize_buffer(fps, buffer_seconds):
-    """
-    Creates a fixed-size circular buffer (deque) to store frames
-    before motion is detected.
-    """
     buffer_size = int(fps * buffer_seconds)
     return collections.deque(maxlen=buffer_size)
 
@@ -60,27 +56,21 @@ def initialize_buffer(fps, buffer_seconds):
 # ==========================================
 
 
+# detect motion by applying background subtraction
 def detect_motion_contours(frame, back_sub):
-    """
-    Processes a frame to detect motion using Background Subtraction.
-    Returns a list of contours that exceed the minimum area threshold.
-    """
-    # 1. Apply background subtraction
+    # apply background subtraction
     fg_mask = back_sub.apply(frame)
 
-    # 2. Apply global threshold to remove shadows (ensure binary mask)
-    _, mask_thresh = cv2.threshold(fg_mask, 180, 255, cv2.THRESH_BINARY)
-
-    # 3. Apply morphological erosion to remove noise/speckles
+    # apply erosion algorithm to remove noise
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask_eroded = cv2.morphologyEx(mask_thresh, cv2.MORPH_OPEN, kernel)
+    mask_eroded = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
 
-    # 4. Find contours
+    # find contours edge, boundary of moving pixels
     contours, _ = cv2.findContours(
         mask_eroded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
 
-    # 5. Filter contours by size
+    # filter contours by size
     valid_contours = [
         cnt for cnt in contours if cv2.contourArea(cnt) > MIN_CONTOUR_AREA
     ]
@@ -88,10 +78,8 @@ def detect_motion_contours(frame, back_sub):
     return valid_contours
 
 
+# draw boxes to check view movement and adjust sensitivity
 def draw_bounding_boxes(frame, contours):
-    """
-    Draws rectangles around detected motion contours.
-    """
     for cnt in contours:
         x, y, w, h = cv2.boundingRect(cnt)
         cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 200), 3)
@@ -110,10 +98,10 @@ def start_surveillance(cam_source=0):
         return
 
     out = setup_video_writer(OUTPUT_FILENAME, fps, width, height)
-    frame_buffer = initialize_buffer(fps, PRE_MOTION_BUFFER_SECONDS)
+    frame_buffer = initialize_buffer(fps, buffer)
 
     # MOG2 Background Subtractor
-    back_sub = cv2.createBackgroundSubtractorMOG2()
+    back_sub = cv2.createBackgroundSubtractorMOG2(detectShadows=False)
 
     # State variables
     is_recording = False
@@ -158,18 +146,16 @@ def start_surveillance(cam_source=0):
             text = f"Time: {current_time}"
             font = cv2.FONT_HERSHEY_SIMPLEX
             position = (10, 30)  # Top-left corner (x, y)
-            font_scale = 1
+            font_scale = 0.5
             color = (255, 255, 255)  # White color (BGR)
-            thickness = 2
+            thickness = 1
             cv2.putText(
                 frame, text, position, font, font_scale, color, thickness, cv2.LINE_AA
             )
             if is_recording:
-                if time.time() - last_motion_time > RECORDER_TIMEOUT_SECONDS:
+                if time.time() - last_motion_time > timeout:
                     is_recording = False
-                    print(
-                        f"Recording stopped. No motion for {RECORDER_TIMEOUT_SECONDS}s."
-                    )
+                    print(f"Recording stopped. No motion for {timeout}s.")
                 else:
                     # Write the current frame with detections
                     # (User's original code wrote the frame with boxes)
@@ -199,4 +185,4 @@ def start_surveillance(cam_source=0):
 # ==========================================
 
 if __name__ == "__main__":
-    start_surveillance(0)
+    start_surveillance(vid_src)
