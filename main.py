@@ -10,7 +10,7 @@ import datetime  # to display current time on recording
 buffer = 3  # seconds of video to record before motion happened
 timeout = 10  # seconds of video to record after motion has ceased
 MIN_CONTOUR_AREA = 500  # Minimum area to consider as valid motion
-OUTPUT_FILENAME = "recorded.mp4"
+OUTPUT_FILENAME = f"{datetime.datetime.now().strftime("%Y-%m-%d %H-%M")}.mp4"
 vid_src = 0
 
 # ==========================================
@@ -65,7 +65,7 @@ def detect_motion_contours(frame, back_sub):
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     mask_eroded = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
 
-    # find contours edge, boundary of moving pixels
+    # find contours edges, boundary of moving pixels
     contours, _ = cv2.findContours(
         mask_eroded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
@@ -78,11 +78,11 @@ def detect_motion_contours(frame, back_sub):
     return valid_contours
 
 
-# draw boxes to check view movement and adjust sensitivity
+# draw boxes around contours to view movement and adjust sensitivity
 def draw_bounding_boxes(frame, contours):
     for cnt in contours:
-        x, y, w, h = cv2.boundingRect(cnt)
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 200), 3)
+        x, y, w, h = cv2.boundingRect(cnt) # gives top left-corner(x,y) and width and height(w,h) to draw rectangle ignoring rotation
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 200), 3) # draws the rectangle onto the frame
     return frame
 
 
@@ -92,22 +92,25 @@ def draw_bounding_boxes(frame, contours):
 
 
 def start_surveillance(cam_source=0):
-    # --- Initialization ---
+    # initializations
+
+    # cam
     cap, fps, width, height = setup_camera(cam_source)
     if cap is None:
         return
-
+    # buffer
     out = setup_video_writer(OUTPUT_FILENAME, fps, width, height)
     frame_buffer = initialize_buffer(fps, buffer)
 
-    # MOG2 Background Subtractor
+    # MOG2 background subtractor (with shadows disabled)
     back_sub = cv2.createBackgroundSubtractorMOG2(detectShadows=False)
 
-    # State variables
+    # state variables for conditionals
     is_recording = False
     last_motion_time = time.time()
 
-    print(f"Surveillance started. FPS: {fps:.2f}. Press 'q' to exit.")
+    print(f"FPS: {fps:.2f}. q to exit.")
+
 
     try:
         while True:
@@ -118,62 +121,52 @@ def start_surveillance(cam_source=0):
             # Always add current frame to the circular buffer
             frame_buffer.append(frame)
 
-            # --- Motion Detection Phase ---
+            # detect motion
             motion_contours = detect_motion_contours(frame, back_sub)
-            motion_detected_now = len(motion_contours) > 0
+            motion_detected_now = len(motion_contours) > 0 # if are drawing even one contour that is counted as movement
 
-            # Create a copy for drawing so we don't save drawn boxes to raw footage
-            # (Note: If you WANT boxes in the saved video, use 'frame' directly)
-            display_frame = frame.copy()
+            display_frame = frame.copy() # so we can show information like boxes for debugging and adjustments on display frame
 
             if motion_detected_now:
                 last_motion_time = time.time()
                 draw_bounding_boxes(display_frame, motion_contours)
 
-            # --- Recording Logic Phase ---
-
-            # CASE A: Motion just started, and we aren't recording yet
+            # motion detected and we're not recording yet so add buffer first
             if motion_detected_now and not is_recording:
                 is_recording = True
-                print("MOTION DETECTED! Writing pre-motion buffer...")
+                print("motion weeeeee")
 
-                # Dump the pre-motion buffer into the video file
+                # write buffer to recording
                 for buffered_frame in list(frame_buffer):
                     out.write(buffered_frame)
 
-            # CASE B: Currently recording (handling timeout)
-            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            text = f"Time: {current_time}"
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            position = (10, 30)  # Top-left corner (x, y)
-            font_scale = 0.5
-            color = (255, 255, 255)  # White color (BGR)
-            thickness = 1
+            # start recording live
             cv2.putText(
-                frame, text, position, font, font_scale, color, thickness, cv2.LINE_AA
+                frame,
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),       # text
+                (10, 30),                      # position
+                cv2.FONT_HERSHEY_SIMPLEX,      # font
+                0.5,                           # font scale
+                (255, 255, 255),               # color
+                1,                             # thickness
+                cv2.LINE_AA,                   # anti-aliasing for smooooothness
             )
             if is_recording:
                 if time.time() - last_motion_time > timeout:
                     is_recording = False
                     print(f"Recording stopped. No motion for {timeout}s.")
                 else:
-                    # Write the current frame with detections
-                    # (User's original code wrote the frame with boxes)
-
-                    draw_bounding_boxes(frame, motion_contours)
+                    # draw_bounding_boxes(display_frame, motion_contours)
                     out.write(frame)
 
-            # 2. Define text parameters
-
-            # 3. Draw the text on the frame_out (which is always displayed)
-            # --- Display Phase ---
+            # display video
             cv2.imshow("Surveillance Feed", display_frame)
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
     finally:
-        # --- Cleanup ---
+        # Thanos SNAP
         print("Cleaning up resources...")
         cap.release()
         out.release()
