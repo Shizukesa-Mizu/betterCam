@@ -3,15 +3,16 @@ import collections  # to store buffers in deque data structures
 import time  # to for buffer and timeout time measurement
 import datetime  # to display current time on recording
 
+
 # ==========================================
 # SETTINGS
 # ==========================================
 
 buffer = 3  # seconds of video to record before motion happened
-timeout = 10  # seconds of video to record after motion has ceased
-MIN_CONTOUR_AREA = 500  # Minimum area to consider as valid motion
-OUTPUT_FILENAME = f"{datetime.datetime.now().strftime("%Y-%m-%d %H-%M")}.mp4"
-vid_src = 0
+timeout = 5  # seconds of video to record after motion has ceased
+MIN_CONTOUR_AREA = 250  # Minimum area to consider as valid motion
+OUTPUT_FILENAME = f"{datetime.datetime.now().strftime('%Y-%m-%d %H-%M')}.mp4"
+vid_src = 0  # 0 for camera, filepath for video, url for mjpeg stream
 
 # ==========================================
 # INITIALIZATION
@@ -23,7 +24,7 @@ def setup_camera(source):
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         print("Error: Could not open camera.")
-        return None, 0, 0, 0
+        return None, 0, 0, 0  # return empty camera could not be opened
 
     # get relevant information about the video stream
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -75,14 +76,21 @@ def detect_motion_contours(frame, back_sub):
         cnt for cnt in contours if cv2.contourArea(cnt) > MIN_CONTOUR_AREA
     ]
 
+    cv2.imshow("background msak", fg_mask)
+    cv2.imshow("erosion", mask_eroded)
+
     return valid_contours
 
 
 # draw boxes around contours to view movement and adjust sensitivity
 def draw_bounding_boxes(frame, contours):
     for cnt in contours:
-        x, y, w, h = cv2.boundingRect(cnt) # gives top left-corner(x,y) and width and height(w,h) to draw rectangle ignoring rotation
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 200), 3) # draws the rectangle onto the frame
+        x, y, w, h = cv2.boundingRect(
+            cnt
+        )  # gives top left-corner(x,y) and width and height(w,h) to draw rectangle ignoring rotation
+        cv2.rectangle(
+            frame, (x, y), (x + w, y + h), (0, 0, 200), 3
+        )  # draws the rectangle onto the frame
     return frame
 
 
@@ -111,7 +119,6 @@ def start_surveillance(cam_source=0):
 
     print(f"FPS: {fps:.2f}. q to exit.")
 
-
     try:
         while True:
             ret, frame = cap.read()
@@ -123,9 +130,11 @@ def start_surveillance(cam_source=0):
 
             # detect motion
             motion_contours = detect_motion_contours(frame, back_sub)
-            motion_detected_now = len(motion_contours) > 0 # if are drawing even one contour that is counted as movement
+            motion_detected_now = (
+                len(motion_contours) > 0
+            )  # if are drawing even one contour that is counted as movement
 
-            display_frame = frame.copy() # so we can show information like boxes for debugging and adjustments on display frame
+            display_frame = frame.copy()  # so we can show information like boxes for debugging and adjustments on display frame
 
             if motion_detected_now:
                 last_motion_time = time.time()
@@ -143,18 +152,18 @@ def start_surveillance(cam_source=0):
             # start recording live
             cv2.putText(
                 frame,
-                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),       # text
-                (10, 30),                      # position
-                cv2.FONT_HERSHEY_SIMPLEX,      # font
-                0.5,                           # font scale
-                (255, 255, 255),               # color
-                1,                             # thickness
-                cv2.LINE_AA,                   # anti-aliasing for smooooothness
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # text
+                (10, 30),  # position
+                cv2.FONT_HERSHEY_SIMPLEX,  # font
+                0.5,  # font scale
+                (255, 255, 255),  # color
+                1,  # thickness
+                cv2.LINE_AA,  # anti-aliasing for smooooothness
             )
             if is_recording:
                 if time.time() - last_motion_time > timeout:
                     is_recording = False
-                    print(f"Recording stopped. No motion for {timeout}s.")
+                    print(f"stopped recording, No motion for {timeout}s.")
                 else:
                     # draw_bounding_boxes(display_frame, motion_contours)
                     out.write(frame)
